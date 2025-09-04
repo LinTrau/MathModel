@@ -3,6 +3,7 @@ using DataFrames
 using Clustering
 using Loess
 using GLM
+using Distances
 using Plots
 using StatsBase
 using Statistics
@@ -20,9 +21,9 @@ indicators_matrix = Matrix(selected_indicators)
 indicators_names = names(selected_indicators)
 
 epsilon = 3  # 聚类半径
-min_pts = 6  # 聚类点数
+min_pts = 2  # 聚类点数
 weight = 100 # 惩罚权重
-
+k_data = Matrix(select(df, "孕妇BMI", "检测孕周"))
 data_matrix = Matrix(select(df, "孕妇BMI", "检测孕周", :is_z_abnormal))
 data_matrix[:, 3] = data_matrix[:, 3] .* weight
 
@@ -93,6 +94,16 @@ end
 distribution_plot = plot(plots_list..., layout=(2, 3), size=(1200, 800), plot_title="各变量分布总览")
 
 # 聚类
+# 计算k-距离
+n = size(k_data, 2)
+distances = pairwise(Euclidean(), k_data, dims=2)
+k_distances = zeros(n)
+for i in 1:n
+    sorted_distances = sort(distances[:, i])
+    k_distances[i] = sorted_distances[min_pts + 1]
+end
+sorted_k_distances = sort(k_distances)
+p_k_distance = plot(sorted_k_distances, title="k-距离图 (k = $min_pts)", xlabel="数据点索引（按距离排序）", ylabel="到第 k 个邻居的距离", legend=false, size=(800, 600))
 result = dbscan(data_matrix', epsilon; min_neighbors=min_pts)
 df[!, :cluster] = assignments(result)
 cluster_summary = combine(groupby(df, :cluster), "孕妇BMI" => mean => :mean_bmi, "检测孕周" => mean => :mean_gestational_week, :is_z_abnormal => sum => :abnormal_count, nrow => :count)
@@ -126,30 +137,31 @@ scatter!(cluster_plot, df_abnormal."孕妇BMI", df_abnormal."检测孕周", mark
 # Y染色体浓度-其他因素的回归
 X = hcat(df."检测孕周", df."孕妇BMI", df.topsis_score)
 y = df."Y染色体浓度"
-regression_df = DataFrame("检测孕周" => df."检测孕周","孕妇BMI" => df."孕妇BMI","TOPSIS评分" => df.topsis_score,"Y染色体浓度" => df."Y染色体浓度")
+regression_df = DataFrame("检测孕周" => df."检测孕周", "孕妇BMI" => df."孕妇BMI", "TOPSIS评分" => df.topsis_score, "Y染色体浓度" => df."Y染色体浓度")
 # 多元线性回归
 model_lm = lm(@formula(Y染色体浓度 ~ 检测孕周 + 孕妇BMI + TOPSIS评分), regression_df)
 y_pred_lm = GLM.predict(model_lm)
 residuals_lm = df."Y染色体浓度" .- y_pred_lm
-p_residuals_lm = plot(y_pred_lm, residuals_lm,seriestype=:scatter,xlabel="预测值",ylabel="残差",title="多元线性回归：残差图",legend=false,markeralpha=0.5)
+p_residuals_lm = plot(y_pred_lm, residuals_lm, seriestype=:scatter, xlabel="预测值", ylabel="残差", title="多元线性回归：残差图", legend=false, markeralpha=0.5)
 hline!(p_residuals_lm, [0], linestyle=:dash, color=:red)
-p_predicted_lm = plot(y_pred_lm, df."Y染色体浓度",seriestype=:scatter,xlabel="预测值",ylabel="实际值",title="多元线性回归：预测值-实际值",legend=false,markeralpha=0.5)
-plot!(p_predicted_lm, [minimum(y_pred_lm), maximum(y_pred_lm)],[minimum(y_pred_lm), maximum(y_pred_lm)],linestyle=:dash, color=:red)
-regression_plots_lm = plot(p_residuals_lm, p_predicted_lm, layout=(1, 2), size=(1000, 500))
+p_predicted_lm = plot(y_pred_lm, df."Y染色体浓度", seriestype=:scatter, xlabel="预测值", ylabel="实际值", title="多元线性回归：预测值-实际值", legend=false, markeralpha=0.5)
+plot!(p_predicted_lm, [minimum(y_pred_lm), maximum(y_pred_lm)], [minimum(y_pred_lm), maximum(y_pred_lm)], linestyle=:dash, color=:red)
+regression_plot_lm = plot(p_residuals_lm, p_predicted_lm, layout=(1, 2), size=(1000, 500))
 # 广义线性模型
-regression_df_glm = DataFrame("检测孕周" => df."检测孕周","孕妇BMI" => df."孕妇BMI","TOPSIS评分" => df.topsis_score,"Y染色体浓度" => df."Y染色体浓度" .+ 1e-9)
-model_glm = glm(@formula(Y染色体浓度 ~ 检测孕周 + 孕妇BMI + TOPSIS评分), regression_df_glm, Gamma, LogLink())
+regression_df_glm = DataFrame("检测孕周" => df."检测孕周", "孕妇BMI" => df."孕妇BMI", "TOPSIS评分" => df.topsis_score, "Y染色体浓度" => df."Y染色体浓度" .+ 1e-9)
+model_glm = glm(@formula(Y染色体浓度 ~ 检测孕周 + 孕妇BMI + TOPSIS评分), regression_df_glm, Gamma(), LogLink())
 y_pred_glm = GLM.predict(model_glm)
 residuals_glm = df."Y染色体浓度" .- y_pred_glm
-p_residuals_glm = plot(y_pred_glm, residuals_glm,seriestype=:scatter,xlabel="预测值",ylabel="残差",title="广义线性模型: 残差图",legend=false,markeralpha=0.5)
+p_residuals_glm = plot(y_pred_glm, residuals_glm, seriestype=:scatter, xlabel="预测值", ylabel="残差", title="广义线性模型: 残差图", legend=false, markeralpha=0.5)
 hline!(p_residuals_glm, [0], linestyle=:dash, color=:red)
-p_predicted_glm = plot(y_pred_glm, df."Y染色体浓度",seriestype=:scatter,xlabel="预测值",ylabel="实际值",title="广义线性模型: 预测值 - 实际值",legend=false,markeralpha=0.5)
-plot!(p_predicted_glm, [minimum(y_pred_glm), maximum(y_pred_glm)],[minimum(y_pred_glm), maximum(y_pred_glm)],linestyle=:dash, color=:red)
-regression_plots_glm = plot(p_residuals_glm, p_predicted_glm, layout=(1, 2), size=(1000, 500))
+p_predicted_glm = plot(y_pred_glm, df."Y染色体浓度", seriestype=:scatter, xlabel="预测值", ylabel="实际值", title="广义线性模型: 预测值 - 实际值", legend=false, markeralpha=0.5)
+plot!(p_predicted_glm, [minimum(y_pred_glm), maximum(y_pred_glm)], [minimum(y_pred_glm), maximum(y_pred_glm)], linestyle=:dash, color=:red)
+regression_plot_glm = plot(p_residuals_glm, p_predicted_glm, layout=(1, 2), size=(1000, 500))
 
 # 绘图、打表
+savefig(p_k_distance, joinpath(output_file_path, "k_distance_graph.png"))
 savefig(cluster_plot, joinpath(output_file_path, "bmi_gestational_week_dbscan_loess.png"))
 savefig(distribution_plot, joinpath(output_file_path, "variable_distributions.png"))
 savefig(regression_plot_lm, joinpath(output_file_path, "regression_diagnostic_lm.png"))
-savefig(regression_plots_glm, joinpath(output_file_path, "regression_diagnostic_glm.png"))
+savefig(regression_plot_glm, joinpath(output_file_path, "regression_diagnostic_glm.png"))
 CSV.write(joinpath(output_file_path, "topsis_scores.csv"), topsis_score_table)

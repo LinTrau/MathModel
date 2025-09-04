@@ -8,7 +8,7 @@ const SCRIPT_DIR = @__DIR__
 
 # 设置文件路径
 input_file_path = abspath(joinpath(SCRIPT_DIR, "../question/男胎检测数据.csv"))
-output_file_path = abspath(joinpath(SCRIPT_DIR, "../output/processed_data.csv"))
+output_file_path = abspath(joinpath(SCRIPT_DIR, "../output/processed_data1.csv"))
 
 function process_fetal_data(input_path::String, output_path::String)
     df = CSV.read(input_path, DataFrame, missingstring="", normalizenames=true)

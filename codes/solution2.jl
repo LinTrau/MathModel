@@ -20,9 +20,9 @@ plots_list = []
 indicators_matrix = Matrix(selected_indicators)
 indicators_names = names(selected_indicators)
 
-epsilon = 3  # 聚类半径
-min_pts = 2  # 聚类点数
-weight = 100 # 惩罚权重
+epsilon = 3.34  # 聚类半径
+min_pts = 3  # 聚类点数
+weight = 100  # 惩罚权重
 k_data = Matrix(select(df, "孕妇BMI", "检测孕周"))
 data_matrix = Matrix(select(df, "孕妇BMI", "检测孕周", :is_z_abnormal))
 data_matrix[:, 3] = data_matrix[:, 3] .* weight
@@ -95,19 +95,23 @@ distribution_plot = plot(plots_list..., layout=(2, 3), size=(1200, 800), plot_ti
 
 # 聚类
 # 计算k-距离
-n = size(k_data, 2)
-distances = pairwise(Euclidean(), k_data, dims=2)
+n = size(k_data, 1)
+distances = pairwise(Euclidean(), k_data, dims=1)
 k_distances = zeros(n)
 for i in 1:n
     sorted_distances = sort(distances[:, i])
-    k_distances[i] = sorted_distances[min_pts + 1]
+    k_distances[i] = sorted_distances[min_pts+1]
 end
-sorted_k_distances = sort(k_distances)
+sorted_k_distances = sort(k_distances, rev=true)
 p_k_distance = plot(sorted_k_distances, title="k-距离图 (k = $min_pts)", xlabel="数据点索引（按距离排序）", ylabel="到第 k 个邻居的距离", legend=false, size=(800, 600))
 result = dbscan(data_matrix', epsilon; min_neighbors=min_pts)
 df[!, :cluster] = assignments(result)
+# DBCSAN方法
 cluster_summary = combine(groupby(df, :cluster), "孕妇BMI" => mean => :mean_bmi, "检测孕周" => mean => :mean_gestational_week, :is_z_abnormal => sum => :abnormal_count, nrow => :count)
 cluster_summary[!, :abnormal_ratio] = cluster_summary.abnormal_count ./ cluster_summary.count
+grouped_by_cluster = groupby(df, :cluster)
+bmi_intervals = combine(grouped_by_cluster, "孕妇BMI" => minimum => :min_bmi, "孕妇BMI" => maximum => :max_bmi, "孕妇BMI" => mean => :mean_bmi, nrow => :count)
+println("各聚类中孕妇BMI的区间统计：", bmi_intervals)
 
 # BMI-孕周的回归
 cluster_plot = plot(title="BMI-孕周聚类与局部加权回归", xlabel="孕妇BMI", ylabel="检测孕周", legend=:topright, size=(800, 600))

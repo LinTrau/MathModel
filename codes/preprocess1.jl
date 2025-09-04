@@ -1,14 +1,10 @@
-# 导入所需的包
 using CSV
 using DataFrames
 using Statistics
 
-# 获取 Julia 脚本的目录
-const SCRIPT_DIR = @__DIR__
-
 # 设置文件路径
-input_file_path = abspath(joinpath(SCRIPT_DIR, "../question/男胎检测数据.csv"))
-output_file_path = abspath(joinpath(SCRIPT_DIR, "../output/processed_data1.csv"))
+input_file_path = abspath(joinpath(@__DIR__, "../question/男胎检测数据.csv"))
+output_file_path = abspath(joinpath(@__DIR__, "../output/processed_data1.csv"))
 
 function process_fetal_data(input_path::String, output_path::String)
     df = CSV.read(input_path, DataFrame, missingstring="", normalizenames=true)

@@ -1,4 +1,5 @@
 using CSV
+using PyCall
 using DataFrames
 using Clustering
 using Loess
@@ -8,6 +9,7 @@ using Plots
 using StatsBase
 using Statistics
 using StatsPlots
+@pyimport hdbscan
 
 input_file_path = abspath(joinpath(@__DIR__, "../output/processed_data2.csv"))
 output_file_path = abspath(joinpath(@__DIR__, "../output/"))
@@ -22,6 +24,9 @@ indicators_names = names(selected_indicators)
 punish_weight = 10000
 k_data = Matrix(select(df, "孕妇BMI", "检测孕周"))
 data_matrix = Matrix(select(df, "孕妇BMI", "检测孕周", :is_z_abnormal))
+# 聚类数据标准化
+scaler = fit(ZScoreTransform, data_matrix[:, 1:2], dims=1)
+data_matrix[:, 1:2] = StatsBase.transform(scaler, data_matrix[:, 1:2])
 data_matrix[:, 3] = data_matrix[:, 3] .* punish_weight
 
 function positivize(col::Vector, type::Symbol)
@@ -100,13 +105,20 @@ for min_pts in 3:10
         k_distances[i] = sorted_distances[min_pts+1]
     end
     sorted_k_distances = sort(k_distances, rev=true)
-    local epsilon = quantile(sorted_k_distances, 0.9)
+    len = length(sorted_k_distances)
+    # 找拐点
+    second_diff = zeros(len - 2)
+    for i in 2:len-1
+        second_diff[i-1] = sorted_k_distances[i-1] - 2 * sorted_k_distances[i] + sorted_k_distances[i+1]
+    end
+    elbow_idx = argmax(abs.(second_diff)) + 1
+    epsilon = sorted_k_distances[elbow_idx]
     p_k_distance = plot(sorted_k_distances, title="k-距离图 (k = $min_pts)", xlabel="数据点索引", ylabel="距离", legend=false, size=(400, 300))
     hline!([epsilon], linestyle=:dash, color=:red, label="选择的ε = $(round(epsilon, digits=2))")
     push!(k_distance_plots, p_k_distance)
     # DBSCAN聚类
-    result = dbscan(data_matrix', epsilon; min_neighbors=min_pts)
-    cluster_labels = assignments(result)
+    dbscan_result = dbscan(data_matrix', epsilon; min_neighbors=min_pts)
+    cluster_labels = assignments(dbscan_result)
     temp_df = copy(df)
     temp_df[!, :cluster] = cluster_labels
     # 打表
@@ -115,7 +127,7 @@ for min_pts in 3:10
     bmi_intervals.epsilon = fill(epsilon, nrow(bmi_intervals))
     global all_bmi_intervals = vcat(all_bmi_intervals, bmi_intervals)
     # 绘图
-    cluster_plot = plot(title="k=$min_pts, ε=$(round(epsilon, digits=2))", xlabel="孕妇BMI", ylabel="检测孕周", legend=false, size=(400, 300))
+    local cluster_plot = plot(title="k=$min_pts, ε=$(round(epsilon, digits=2))", xlabel="孕妇BMI", ylabel="检测孕周", legend=false, size=(400, 300))
     for (i, grp) in enumerate(groupby(temp_df, :cluster))
         if grp.cluster[1] == 0
             scatter!(cluster_plot, grp."孕妇BMI", grp."检测孕周", markershape=:x, markercolor=:black, markersize=2)
@@ -123,20 +135,61 @@ for min_pts in 3:10
         end
         x_data = grp."孕妇BMI"
         y_data = grp."检测孕周"
-        if length(x_data) > 1
-            model = loess(x_data, y_data)
-            x_pred = collect(range(minimum(x_data), stop=maximum(x_data), length=50))
-            y_pred = predict(model, x_pred)
-            scatter!(cluster_plot, x_data, y_data, markercolor=i, markersize=2)
-            plot!(cluster_plot, x_pred, y_pred, linewidth=1, linestyle=:dash, linecolor=i)
-        end
+        model = loess(x_data, y_data)
+        x_pred = collect(range(minimum(x_data), stop=maximum(x_data), length=50))
+        y_pred = predict(model, x_pred)
+        # 寻找回归最小值
+        min_idx = argmin(y_pred)
+        min_x = x_pred[min_idx]
+        min_y = y_pred[min_idx]
+        scatter!(cluster_plot, [min_x], [min_y], markercolor=:red, markershape=:star5, markersize=4, markerstrokewidth=1, markerstrokecolor=:black)
+        annotate!(min_x, min_y + 0.8, text("Min($(round(min_x, digits=1)), $(round(min_y, digits=1)))", 6, :center, :bottom, :red))
+        scatter!(cluster_plot, x_data, y_data, markercolor=i, markersize=2)
+        plot!(cluster_plot, x_pred, y_pred, linewidth=1, linestyle=:dash, linecolor=i)
+
     end
     df_abnormal = filter(:is_z_abnormal => x -> x == true, temp_df)
-    scatter!(cluster_plot, df_abnormal."孕妇BMI", df_abnormal."检测孕周", markercolor=:cyan, markershape=:rtriangle, label="Z值异常点", markersize=3)
+    scatter!(cluster_plot, df_abnormal."孕妇BMI", df_abnormal."检测孕周", markercolor=:cyan, markershape=:rtriangle, label="Z值异常点", markersize=5)
     push!(cluster_plots, cluster_plot)
 end
 k_distance_com_plot = plot(k_distance_plots..., layout=(2, 4), size=(1600, 800), plot_title="不同k值的k-距离图对比")
-cluster_com_plot = plot(cluster_plots..., layout=(2, 4), size=(1600, 800), plot_title="不同k值的聚类结果对比")
+dbscan_com_plot = plot(cluster_plots..., layout=(2, 4), size=(1600, 800), plot_title="不同k值的聚类结果对比")
+# HDBSCAN聚类
+clusterer = hdbscan.HDBSCAN(min_cluster_size=k)
+hdbscan_clusters = clusterer.fit_predict(data_matrix[:, 1:2])
+df.hdbscan_cluster = hdbscan_clusters
+p_hdbscan = scatter(df."孕妇BMI", df."检测孕周", group=df.hdbscan_cluster, markerstrokewidth=0, markeralpha=0.7, title="HDBSCAN 聚类结果 (min_cluster_size=15)", xlabel="孕妇BMI", ylabel="检测孕周", legend=:outertopright)
+local cluster_plots = []
+for k in 5:12
+    clusterer = hdbscan.HDBSCAN(min_cluster_size=k)
+    hdbscan_clusters = clusterer.fit_predict(data_matrix[:, 1:2])
+    df.hdbscan_cluster = hdbscan_clusters
+    p_hdbscan = plot(title="HDBSCAN 聚类结果 (min_cluster_size=$k)", xlabel="孕妇BMI", ylabel="检测孕周", legend=false, size=(1000, 800))
+    df_abnormal = filter(:is_z_abnormal => x -> x == true, df)
+    scatter!(p_hdbscan, df_abnormal."孕妇BMI", df_abnormal."检测孕周", markercolor=:cyan, markershape=:rtriangle, label="Z值异常点", markersize=3)
+    for (i, grp) in enumerate(groupby(df, :hdbscan_cluster))
+        if grp.hdbscan_cluster[1] == -1
+            scatter!(p_hdbscan, grp."孕妇BMI", grp."检测孕周", markershape=:x, markercolor=:black, markersize=2, label="噪声点")
+            continue
+        end
+        x_data = grp."孕妇BMI"
+        y_data = grp."检测孕周"
+        if length(x_data) > k
+            model = loess(x_data, y_data)
+            x_pred = collect(range(minimum(x_data), stop=maximum(x_data), length=50))
+            y_pred = predict(model, x_pred)
+            min_idx = argmin(y_pred)
+            min_x = x_pred[min_idx]
+            min_y = y_pred[min_idx]
+            scatter!(p_hdbscan, [min_x], [min_y], markercolor=:red, markershape=:star5, markersize=8, markerstrokewidth=1, markerstrokecolor=:black, label=false)
+            annotate!(p_hdbscan, min_x, min_y + 0.8, text("Min($(round(min_x, digits=1)), $(round(min_y, digits=1)))", 8, :center, :bottom, :red))
+            plot!(p_hdbscan, x_pred, y_pred, linewidth=2, linestyle=:dash, linecolor=i, label=false)
+        end
+        scatter!(p_hdbscan, x_data, y_data, markercolor=i, markersize=2, label="Cluster $(grp.hdbscan_cluster[1])")
+    end
+    push!(hdbscan_plots, p_hdbscan)
+end
+hdbscan_com_plot = plot(hdbscan_plots..., layout=(2, 4), size=(1600, 800), plot_title="不同min_cluster_size的HDBSCAN聚类结果对比")
 
 # Y染色体浓度-其他因素的回归
 X = hcat(df."检测孕周", df."孕妇BMI", df.topsis_score)
@@ -164,7 +217,8 @@ regression_plot_glm = plot(p_residuals_glm, p_predicted_glm, layout=(1, 2), size
 
 # 绘图、打表
 savefig(k_distance_com_plot, joinpath(output_file_path, "k_distance_comparison.png"))
-savefig(cluster_com_plot, joinpath(output_file_path, "clustering_comparison.png"))
+savefig(dbscan_com_plot, joinpath(output_file_path, "dbscan_clusters.png"))
+savefig(hdbscan_com_plot, joinpath(output_file_path, "hdbscan_clusters.png"))
 savefig(distribution_plot, joinpath(output_file_path, "variable_distributions.png"))
 savefig(regression_plot_lm, joinpath(output_file_path, "regression_diagnostic_lm.png"))
 savefig(regression_plot_glm, joinpath(output_file_path, "regression_diagnostic_glm.png"))

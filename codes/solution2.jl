@@ -19,13 +19,10 @@ variables = ["唯一比对的读段数", "被过滤掉读段数的比例", "重�
 plots_list = []
 indicators_matrix = Matrix(selected_indicators)
 indicators_names = names(selected_indicators)
-
-epsilon = 3.34  # 聚类半径
-min_pts = 3  # 聚类点数
-weight = 100  # 惩罚权重
+punish_weight = 100
 k_data = Matrix(select(df, "孕妇BMI", "检测孕周"))
 data_matrix = Matrix(select(df, "孕妇BMI", "检测孕周", :is_z_abnormal))
-data_matrix[:, 3] = data_matrix[:, 3] .* weight
+data_matrix[:, 3] = data_matrix[:, 3] .* punish_weight
 
 function positivize(col::Vector, type::Symbol)
     if type == :benefit
@@ -90,34 +87,69 @@ end
 distribution_plot = plot(plots_list..., layout=(2, 3), size=(1200, 800), plot_title="各变量分布总览")
 
 # 聚类
-# 计算k-距离
 n = size(k_data, 1)
 distances = pairwise(Euclidean(), k_data, dims=1)
-k_distances = zeros(n)
-for i in 1:n
-    sorted_distances = sort(distances[:, i])
-    k_distances[i] = sorted_distances[min_pts+1]
+k_distance_plots = []
+cluster_plots = []
+all_bmi_intervals = DataFrame()
+for min_pts in 3:10
+    # 计算k-距离
+    k_distances = zeros(n)
+    for i in 1:n
+        sorted_distances = sort(distances[:, i])
+        k_distances[i] = sorted_distances[min_pts+1]
+    end
+    sorted_k_distances = sort(k_distances, rev=true)
+    epsilon = quantile(sorted_k_distances, 0.9)
+    p_k_distance = plot(sorted_k_distances, title="k-距离图 (k = $min_pts)", xlabel="数据点索引", ylabel="距离", legend=false, size=(400, 300))
+    hline!([epsilon], linestyle=:dash, color=:red, label="选择的ε = $(round(epsilon, digits=2))")
+    push!(k_distance_plots, p_k_distance)
+    # DBSCAN聚类
+    result = dbscan(data_matrix', epsilon; min_neighbors=min_pts)
+    cluster_labels = assignments(result)
+    temp_df = copy(df)
+    temp_df[!, :cluster] = cluster_labels
+    cluster_summary = combine(groupby(temp_df, :cluster), "孕妇BMI" => mean => :mean_bmi, "检测孕周" => mean => :mean_gestational_week, :is_z_abnormal => sum => :abnormal_count, nrow => :count)
+    cluster_summary[!, :abnormal_ratio] = cluster_summary.abnormal_count ./ cluster_summary.count
+    bmi_intervals = combine(groupby(temp_df, :cluster), "孕妇BMI" => minimum => :min_bmi, "孕妇BMI" => maximum => :max_bmi, "孕妇BMI" => mean => :mean_bmi, nrow => :count)
+    bmi_intervals[!, :k_value] = min_pts
+    bmi_intervals[!, :epsilon] = epsilon
+    # 打表
+    if isempty(all_bmi_intervals)
+        all_bmi_intervals = bmi_intervals
+    else
+        all_bmi_intervals = vcat(all_bmi_intervals, bmi_intervals)
+    end
+    # 绘图
+    cluster_plot = plot(title="k=$min_pts, ε=$(round(epsilon, digits=2))", xlabel="孕妇BMI", ylabel="检测孕周", legend=false, size=(400, 300))
+    for (i, grp) in enumerate(groupby(temp_df, :cluster))
+        if grp.cluster[1] == 0
+            scatter!(cluster_plot, grp."孕妇BMI", grp."检测孕周", markershape=:x, markercolor=:black, markersize=2)
+            continue
+        end
+        x_data = grp."孕妇BMI"
+        y_data = grp."检测孕周"
+        if length(x_data) > 1
+            model = loess(x_data, y_data)
+            x_pred = collect(range(minimum(x_data), stop=maximum(x_data), length=50))
+            y_pred = predict(model, x_pred)
+            scatter!(cluster_plot, x_data, y_data, markercolor=i, markersize=2)
+            plot!(cluster_plot, x_pred, y_pred, linewidth=1, linestyle=:dash, linecolor=i)
+        end
+    end
+    df_abnormal = filter(:is_z_abnormal => x -> x == true, temp_df)
+    scatter!(cluster_plot, df_abnormal."孕妇BMI", df_abnormal."检测孕周", markercolor=:cyan, markershape=:rtriangle, markersize=3)
+    push!(cluster_plots, cluster_plot)
 end
-sorted_k_distances = sort(k_distances, rev=true)
-p_k_distance = plot(sorted_k_distances, title="k-距离图 (k = $min_pts)", xlabel="数据点索引（按距离排序）", ylabel="到第 k 个邻居的距离", legend=false, size=(800, 600))
-result = dbscan(data_matrix', epsilon; min_neighbors=min_pts)
-df[!, :cluster] = assignments(result)
-# DBCSAN方法
-cluster_summary = combine(groupby(df, :cluster), "孕妇BMI" => mean => :mean_bmi, "检测孕周" => mean => :mean_gestational_week, :is_z_abnormal => sum => :abnormal_count, nrow => :count)
-cluster_summary[!, :abnormal_ratio] = cluster_summary.abnormal_count ./ cluster_summary.count
-grouped_by_cluster = groupby(df, :cluster)
-bmi_intervals = combine(grouped_by_cluster, "孕妇BMI" => minimum => :min_bmi, "孕妇BMI" => maximum => :max_bmi, "孕妇BMI" => mean => :mean_bmi, nrow => :count)
-println("各聚类中孕妇BMI的区间统计：", bmi_intervals)
-
 # BMI-孕周的回归
 cluster_plot = plot(title="BMI-孕周聚类与局部加权回归", xlabel="孕妇BMI", ylabel="检测孕周", legend=:topright, size=(800, 600))
 for (i, grp) in enumerate(groupby(df, :cluster))
-    # 筛选掉噪声点
+    # 筛选噪声点
     if grp.cluster[1] == 0
         scatter!(cluster_plot, grp."孕妇BMI", grp."检测孕周", label="噪声点", markershape=:x, markercolor=:black)
         continue
     end
-    # 拟合局部加权回归模型
+    # 局部加权回归
     x_data = grp."孕妇BMI"
     y_data = grp."检测孕周"
     if length(x_data) > 1
@@ -133,6 +165,8 @@ for (i, grp) in enumerate(groupby(df, :cluster))
 end
 df_abnormal = filter(:is_z_abnormal => x -> x == true, df)
 scatter!(cluster_plot, df_abnormal."孕妇BMI", df_abnormal."检测孕周", markercolor=:cyan, markershape=:rtriangle, label="Z值异常点", markersize=6)
+k_distance_plot = plot(k_distance_plots..., layout=(2, 4), size=(1600, 800), plot_title="不同k值的k-距离图对比")
+cluster_plot = plot(cluster_plots..., layout=(2, 4), size=(1600, 800), plot_title="不同k值的聚类结果对比")
 
 # Y染色体浓度-其他因素的回归
 X = hcat(df."检测孕周", df."孕妇BMI", df.topsis_score)
@@ -159,9 +193,10 @@ plot!(p_predicted_glm, [minimum(y_pred_glm), maximum(y_pred_glm)], [minimum(y_pr
 regression_plot_glm = plot(p_residuals_glm, p_predicted_glm, layout=(1, 2), size=(1000, 500))
 
 # 绘图、打表
-savefig(p_k_distance, joinpath(output_file_path, "k_distance_graph.png"))
-savefig(cluster_plot, joinpath(output_file_path, "bmi_gestational_week_dbscan_loess.png"))
+savefig(k_distance_plot, joinpath(output_file_path, "k_distance_comparison.png"))
+savefig(cluster_plot, joinpath(output_file_path, "clustering_comparison.png"))
 savefig(distribution_plot, joinpath(output_file_path, "variable_distributions.png"))
 savefig(regression_plot_lm, joinpath(output_file_path, "regression_diagnostic_lm.png"))
 savefig(regression_plot_glm, joinpath(output_file_path, "regression_diagnostic_glm.png"))
+CSV.write(joinpath(output_file_path, "bmi_intervals.csv"), all_bmi_intervals)
 CSV.write(joinpath(output_file_path, "topsis_scores.csv"), entropy_topsis)

@@ -19,7 +19,7 @@ variables = ["唯一比对的读段数", "被过滤掉读段数的比例", "重�
 plots_list = []
 indicators_matrix = Matrix(selected_indicators)
 indicators_names = names(selected_indicators)
-punish_weight = 100
+punish_weight = 10000
 k_data = Matrix(select(df, "孕妇BMI", "检测孕周"))
 data_matrix = Matrix(select(df, "孕妇BMI", "检测孕周", :is_z_abnormal))
 data_matrix[:, 3] = data_matrix[:, 3] .* punish_weight
@@ -100,7 +100,7 @@ for min_pts in 3:10
         k_distances[i] = sorted_distances[min_pts+1]
     end
     sorted_k_distances = sort(k_distances, rev=true)
-    epsilon = quantile(sorted_k_distances, 0.9)
+    local epsilon = quantile(sorted_k_distances, 0.9)
     p_k_distance = plot(sorted_k_distances, title="k-距离图 (k = $min_pts)", xlabel="数据点索引", ylabel="距离", legend=false, size=(400, 300))
     hline!([epsilon], linestyle=:dash, color=:red, label="选择的ε = $(round(epsilon, digits=2))")
     push!(k_distance_plots, p_k_distance)
@@ -109,17 +109,11 @@ for min_pts in 3:10
     cluster_labels = assignments(result)
     temp_df = copy(df)
     temp_df[!, :cluster] = cluster_labels
-    cluster_summary = combine(groupby(temp_df, :cluster), "孕妇BMI" => mean => :mean_bmi, "检测孕周" => mean => :mean_gestational_week, :is_z_abnormal => sum => :abnormal_count, nrow => :count)
-    cluster_summary[!, :abnormal_ratio] = cluster_summary.abnormal_count ./ cluster_summary.count
-    bmi_intervals = combine(groupby(temp_df, :cluster), "孕妇BMI" => minimum => :min_bmi, "孕妇BMI" => maximum => :max_bmi, "孕妇BMI" => mean => :mean_bmi, nrow => :count)
-    bmi_intervals[!, :k_value] = min_pts
-    bmi_intervals[!, :epsilon] = epsilon
     # 打表
-    if isempty(all_bmi_intervals)
-        all_bmi_intervals = bmi_intervals
-    else
-        all_bmi_intervals = vcat(all_bmi_intervals, bmi_intervals)
-    end
+    bmi_intervals = combine(groupby(temp_df, :cluster), "孕妇BMI" => minimum => :min_bmi, "孕妇BMI" => maximum => :max_bmi, "孕妇BMI" => mean => :mean_bmi, nrow => :count)
+    bmi_intervals.k_value = fill(min_pts, nrow(bmi_intervals))
+    bmi_intervals.epsilon = fill(epsilon, nrow(bmi_intervals))
+    global all_bmi_intervals = vcat(all_bmi_intervals, bmi_intervals)
     # 绘图
     cluster_plot = plot(title="k=$min_pts, ε=$(round(epsilon, digits=2))", xlabel="孕妇BMI", ylabel="检测孕周", legend=false, size=(400, 300))
     for (i, grp) in enumerate(groupby(temp_df, :cluster))
@@ -138,35 +132,11 @@ for min_pts in 3:10
         end
     end
     df_abnormal = filter(:is_z_abnormal => x -> x == true, temp_df)
-    scatter!(cluster_plot, df_abnormal."孕妇BMI", df_abnormal."检测孕周", markercolor=:cyan, markershape=:rtriangle, markersize=3)
+    scatter!(cluster_plot, df_abnormal."孕妇BMI", df_abnormal."检测孕周", markercolor=:cyan, markershape=:rtriangle, label="Z值异常点", markersize=3)
     push!(cluster_plots, cluster_plot)
 end
-# BMI-孕周的回归
-cluster_plot = plot(title="BMI-孕周聚类与局部加权回归", xlabel="孕妇BMI", ylabel="检测孕周", legend=:topright, size=(800, 600))
-for (i, grp) in enumerate(groupby(df, :cluster))
-    # 筛选噪声点
-    if grp.cluster[1] == 0
-        scatter!(cluster_plot, grp."孕妇BMI", grp."检测孕周", label="噪声点", markershape=:x, markercolor=:black)
-        continue
-    end
-    # 局部加权回归
-    x_data = grp."孕妇BMI"
-    y_data = grp."检测孕周"
-    if length(x_data) > 1
-        model = loess(x_data, y_data)
-        x_pred = collect(range(minimum(x_data), stop=maximum(x_data), length=100))
-        y_pred = predict(model, x_pred)
-        scatter!(cluster_plot, x_data, y_data, label="聚类 $(grp.cluster[1])", markercolor=i)
-        plot!(cluster_plot, x_pred, y_pred, label="回归曲线 $(grp.cluster[1])", linewidth=2, linestyle=:dash, linecolor=i)
-        mid_idx = Int(floor(length(x_pred) / 2))
-        annotate!(x_pred[mid_idx], y_pred[mid_idx] + 0.5,
-            text("outlier_concentration: $(round(cluster_summary[cluster_summary.cluster .== grp.cluster[1], :abnormal_ratio][1] * 100, digits=8))%", 8, :left, :bottom, :black))
-    end
-end
-df_abnormal = filter(:is_z_abnormal => x -> x == true, df)
-scatter!(cluster_plot, df_abnormal."孕妇BMI", df_abnormal."检测孕周", markercolor=:cyan, markershape=:rtriangle, label="Z值异常点", markersize=6)
-k_distance_plot = plot(k_distance_plots..., layout=(2, 4), size=(1600, 800), plot_title="不同k值的k-距离图对比")
-cluster_plot = plot(cluster_plots..., layout=(2, 4), size=(1600, 800), plot_title="不同k值的聚类结果对比")
+k_distance_com_plot = plot(k_distance_plots..., layout=(2, 4), size=(1600, 800), plot_title="不同k值的k-距离图对比")
+cluster_com_plot = plot(cluster_plots..., layout=(2, 4), size=(1600, 800), plot_title="不同k值的聚类结果对比")
 
 # Y染色体浓度-其他因素的回归
 X = hcat(df."检测孕周", df."孕妇BMI", df.topsis_score)
@@ -193,8 +163,8 @@ plot!(p_predicted_glm, [minimum(y_pred_glm), maximum(y_pred_glm)], [minimum(y_pr
 regression_plot_glm = plot(p_residuals_glm, p_predicted_glm, layout=(1, 2), size=(1000, 500))
 
 # 绘图、打表
-savefig(k_distance_plot, joinpath(output_file_path, "k_distance_comparison.png"))
-savefig(cluster_plot, joinpath(output_file_path, "clustering_comparison.png"))
+savefig(k_distance_com_plot, joinpath(output_file_path, "k_distance_comparison.png"))
+savefig(cluster_com_plot, joinpath(output_file_path, "clustering_comparison.png"))
 savefig(distribution_plot, joinpath(output_file_path, "variable_distributions.png"))
 savefig(regression_plot_lm, joinpath(output_file_path, "regression_diagnostic_lm.png"))
 savefig(regression_plot_glm, joinpath(output_file_path, "regression_diagnostic_glm.png"))

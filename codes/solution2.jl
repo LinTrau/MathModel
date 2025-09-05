@@ -78,11 +78,7 @@ for i in 1:n
 end
 topsis_score = negative_distance ./ (positive_distance .+ negative_distance)
 df[!, :topsis_score] = topsis_score
-entropy_topsis_table = DataFrame(
-    "指标" => indicators_names,
-    "权重" => weights
-)
-topsis_score_table = select(df, "孕妇代码", :topsis_score)
+entropy_topsis = DataFrame("孕妇代码" => df."孕妇代码", "唯一比对的读段数权重" => weights[1], "被过滤掉读段数的比例权重" => weights[2], "重复读段的比例权重" => weights[3], "在参考基因组上比对的比例权重" => weights[4], "Y染色体的Z值权重" => weights[5], "TOPSIS总得分" => topsis_score)
 
 # 遍历每个变量并绘制直方图和分布曲线
 for var in variables
@@ -168,4 +164,4 @@ savefig(cluster_plot, joinpath(output_file_path, "bmi_gestational_week_dbscan_lo
 savefig(distribution_plot, joinpath(output_file_path, "variable_distributions.png"))
 savefig(regression_plot_lm, joinpath(output_file_path, "regression_diagnostic_lm.png"))
 savefig(regression_plot_glm, joinpath(output_file_path, "regression_diagnostic_glm.png"))
-CSV.write(joinpath(output_file_path, "topsis_scores.csv"), topsis_score_table)
+CSV.write(joinpath(output_file_path, "topsis_scores.csv"), entropy_topsis)

@@ -3,7 +3,6 @@ using PyCall
 using DataFrames
 using Clustering
 using Loess
-using GLM
 using Distances
 using Plots
 using StatsBase

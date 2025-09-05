@@ -135,7 +135,7 @@ all_hdbscan_intervals.algorithm .= "HDBSCAN"
 all_bmi_intervals = vcat(all_dbscan_intervals, all_hdbscan_intervals, cols=:union)
 
 # 绘图、打表
-savefig(k_distance_com_plot, joinpath(output_file_path, "k_distance_comparison.png"))
-savefig(dbscan_com_plot, joinpath(output_file_path, "dbscan_clusters.png"))
-savefig(hdbscan_com_plot, joinpath(output_file_path, "hdbscan_clusters.png"))
-CSV.write(joinpath(output_file_path, "bmi_intervals.csv"), all_bmi_intervals)
+savefig(k_distance_com_plot, joinpath(output_file_path, "k_distance_comparison2.png"))
+savefig(dbscan_com_plot, joinpath(output_file_path, "dbscan_clusters2.png"))
+savefig(hdbscan_com_plot, joinpath(output_file_path, "hdbscan_clusters2.png"))
+CSV.write(joinpath(output_file_path, "bmi_intervals2.csv"), all_bmi_intervals)

@@ -91,11 +91,11 @@ for var in variables
 end
 distribution_plot = plot(plots_list..., layout=(2, 3), size=(1200, 800), plot_title="各变量分布总览")
 
-# 聚类
+# DBSCAN聚类
 n = size(k_data, 1)
 distances = pairwise(Euclidean(), k_data, dims=1)
 k_distance_plots = []
-cluster_plots = []
+dbscan_plots = []
 all_bmi_intervals = DataFrame()
 for min_pts in 3:10
     # 计算k-距离
@@ -116,7 +116,6 @@ for min_pts in 3:10
     p_k_distance = plot(sorted_k_distances, title="k-距离图 (k = $min_pts)", xlabel="数据点索引", ylabel="距离", legend=false, size=(400, 300))
     hline!([epsilon], linestyle=:dash, color=:red, label="选择的ε = $(round(epsilon, digits=2))")
     push!(k_distance_plots, p_k_distance)
-    # DBSCAN聚类
     dbscan_result = dbscan(data_matrix', epsilon; min_neighbors=min_pts)
     cluster_labels = assignments(dbscan_result)
     temp_df = copy(df)
@@ -127,7 +126,7 @@ for min_pts in 3:10
     bmi_intervals.epsilon = fill(epsilon, nrow(bmi_intervals))
     global all_bmi_intervals = vcat(all_bmi_intervals, bmi_intervals)
     # 绘图
-    local cluster_plot = plot(title="k=$min_pts, ε=$(round(epsilon, digits=2))", xlabel="孕妇BMI", ylabel="检测孕周", legend=false, size=(400, 300))
+    cluster_plot = plot(title="k=$min_pts, ε=$(round(epsilon, digits=2))", xlabel="孕妇BMI", ylabel="检测孕周", legend=false, size=(400, 300))
     for (i, grp) in enumerate(groupby(temp_df, :cluster))
         if grp.cluster[1] == 0
             scatter!(cluster_plot, grp."孕妇BMI", grp."检测孕周", markershape=:x, markercolor=:black, markersize=2)
@@ -150,21 +149,17 @@ for min_pts in 3:10
     end
     df_abnormal = filter(:is_z_abnormal => x -> x == true, temp_df)
     scatter!(cluster_plot, df_abnormal."孕妇BMI", df_abnormal."检测孕周", markercolor=:cyan, markershape=:rtriangle, label="Z值异常点", markersize=5)
-    push!(cluster_plots, cluster_plot)
+    push!(dbscan_plots, cluster_plot)
 end
 k_distance_com_plot = plot(k_distance_plots..., layout=(2, 4), size=(1600, 800), plot_title="不同k值的k-距离图对比")
-dbscan_com_plot = plot(cluster_plots..., layout=(2, 4), size=(1600, 800), plot_title="不同k值的聚类结果对比")
+dbscan_com_plot = plot(dbscan_plots..., layout=(2, 4), size=(1600, 800), plot_title="不同k值的聚类结果对比")
 # HDBSCAN聚类
-clusterer = hdbscan.HDBSCAN(min_cluster_size=k)
-hdbscan_clusters = clusterer.fit_predict(data_matrix[:, 1:2])
-df.hdbscan_cluster = hdbscan_clusters
-p_hdbscan = scatter(df."孕妇BMI", df."检测孕周", group=df.hdbscan_cluster, markerstrokewidth=0, markeralpha=0.7, title="HDBSCAN 聚类结果 (min_cluster_size=15)", xlabel="孕妇BMI", ylabel="检测孕周", legend=:outertopright)
-local cluster_plots = []
+hdbscan_plots = []
 for k in 5:12
     clusterer = hdbscan.HDBSCAN(min_cluster_size=k)
     hdbscan_clusters = clusterer.fit_predict(data_matrix[:, 1:2])
     df.hdbscan_cluster = hdbscan_clusters
-    p_hdbscan = plot(title="HDBSCAN 聚类结果 (min_cluster_size=$k)", xlabel="孕妇BMI", ylabel="检测孕周", legend=false, size=(1000, 800))
+    p_hdbscan = plot(title="HDBSCAN 聚类结果 (MinClusterSize=$k)", xlabel="孕妇BMI", ylabel="检测孕周", legend=false, size=(1000, 800))
     df_abnormal = filter(:is_z_abnormal => x -> x == true, df)
     scatter!(p_hdbscan, df_abnormal."孕妇BMI", df_abnormal."检测孕周", markercolor=:cyan, markershape=:rtriangle, label="Z值异常点", markersize=3)
     for (i, grp) in enumerate(groupby(df, :hdbscan_cluster))
@@ -189,7 +184,7 @@ for k in 5:12
     end
     push!(hdbscan_plots, p_hdbscan)
 end
-hdbscan_com_plot = plot(hdbscan_plots..., layout=(2, 4), size=(1600, 800), plot_title="不同min_cluster_size的HDBSCAN聚类结果对比")
+hdbscan_com_plot = plot(hdbscan_plots..., layout=(2, 4), size=(1600, 800), plot_title="不同MinClusterSize的HDBSCAN聚类结果对比")
 
 # Y染色体浓度-其他因素的回归
 X = hcat(df."检测孕周", df."孕妇BMI", df.topsis_score)

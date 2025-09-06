@@ -16,6 +16,7 @@ function process_fetal_data(input_data::String, output_path::String)
         Symbol("检测抽血次数") => :blood_draw_count,
         Symbol("检测孕周") => :gestational_week,
         Symbol("孕妇BMI") => :bmi,
+        Symbol("GC含量") => :gc_content,
         Symbol("原始读段数") => :oringin_reads,
         Symbol("唯一比对的读段数") => :unique_aligned_reads,
         Symbol("被过滤掉读段数的比例") => :filtered_read_ratio,
@@ -36,15 +37,15 @@ function process_fetal_data(input_data::String, output_path::String)
         return weeks + days / 7
     end
     df.gestational_week = parse_gestational_week.(df.gestational_week)
-    output = filter(row -> abs(row.oringin_reads * (1 - row.filtered_read_ratio) * row.alignment_ratio_to_reference_genome * (1 - row.duplicate_read_ratio) - row.unique_aligned_reads) < 2, df)
     # 重新排列列的顺序、重命名
-    select!(output, :code,
+    select!(df, :code,
         :age,
         :height,
         :weight,
         :blood_draw_count,
         :gestational_week,
         :bmi,
+        :gc_content,
         :oringin_reads,
         :unique_aligned_reads,
         :filtered_read_ratio,
@@ -52,13 +53,14 @@ function process_fetal_data(input_data::String, output_path::String)
         :alignment_ratio_to_reference_genome,
         :z_value_of_y_chromosome,
         :y_chromosome_concentration)
-    DataFrames.rename!(output, :code => "孕妇代码",
+    DataFrames.rename!(df, :code => "孕妇代码",
         :age => "年龄",
         :height => "身高",
         :weight => "体重",
         :blood_draw_count => "检测抽血次数",
         :gestational_week => "检测孕周",
         :bmi => "孕妇BMI",
+        :gc_content => "GC含量",
         :oringin_reads => "原始读段数",
         :unique_aligned_reads => "唯一比对的读段数",
         :filtered_read_ratio => "被过滤掉读段数的比例",
@@ -66,7 +68,7 @@ function process_fetal_data(input_data::String, output_path::String)
         :alignment_ratio_to_reference_genome => "在参考基因组上比对的比例",
         :z_value_of_y_chromosome => "Y染色体的Z值",
         :y_chromosome_concentration => "Y染色体浓度")
-    CSV.write(output_path, output)
+    CSV.write(output_path, df)
 end
 
 # 调用函数执行处理

@@ -15,7 +15,7 @@ output_file_path = abspath(joinpath(@__DIR__, "../output/"))
 default(fontfamily="LXGWWenKai-Medium")
 
 df = CSV.read(input_file_path, DataFrame)
-df.is_z_abnormal = abs.(df."Y染色体的Z值") .>= 3
+df.is_z_abnormal = (abs.(df."Y染色体的Z值") .>= 3) .| (df."GC含量" .< 0.4) .| (df."GC含量" .> 0.6)
 
 punish_weight = 10000
 k_data = Matrix(select(df, "孕妇BMI", "检测孕周"))

@@ -30,10 +30,11 @@ detection_error_vars = ["原始读段数", "唯一比对的读段数", "被过�
 error_data = Matrix(select(df, detection_error_vars))
 error_scaler = fit(ZScoreTransform, error_data, dims=1)
 error_data_scaled = StatsBase.transform(error_scaler, error_data)
-M = fit(PCA, error_data_scaled'; maxoutdim=2)
+M = fit(PCA, error_data_scaled'; maxoutdim=3)
 error_pcs = predict(M, error_data_scaled')'
 df[!, :pc1] = error_pcs[:, 1]
 df[!, :pc2] = error_pcs[:, 2]
+df[!, :pc3] = error_pcs[:, 3]
 
 function loess_predict(x_train, y_train, x_pred)
     n_pred = size(x_pred, 1)
@@ -132,7 +133,7 @@ for min_pts in (num_dims+1):(num_dims+8)
             "平均年龄" => fill(mean(grp."年龄"), length(gest_week_range)),
             "平均身高" => fill(mean(grp."身高"), length(gest_week_range)),
             "平均体重" => fill(mean(grp."体重"), length(gest_week_range)),
-            "平均PC1" => fill(mean(grp.pc1), length(gest_week_range)),
+            "平均PC3" => fill(mean(grp.pc3), length(gest_week_range)),
             "cluster" => fill(first(grp.cluster), length(gest_week_range)),
             "min_pts" => fill(min_pts, length(gest_week_range)),
             "epsilon" => fill(epsilon, length(gest_week_range))

@@ -1,0 +1,4 @@
+Metric,Value
+R²,0.09430334997347656
+聚类数(DBSCAN),3.0
+聚类数(HDBSCAN),5.0
